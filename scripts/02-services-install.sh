@@ -59,9 +59,13 @@ check_prerequisites() {
         exit 1
     fi
     
-    # 检查用户权限
-    if ! groups $USER | grep -q docker; then
-        log_error "当前用户不在 docker 组中，请重新登录或运行: newgrp docker"
+    # 检查 Docker 权限 - 尝试运行基本命令
+    if ! docker version >/dev/null 2>&1; then
+        log_error "无法访问 Docker，可能的原因："
+        log_error "1. Docker 服务未启动"
+        log_error "2. 用户权限未生效（需要重新登录或运行: newgrp docker）"
+        log_error "3. 系统配置未完成"
+        log_error "请先确保系统配置脚本成功执行"
         exit 1
     fi
     

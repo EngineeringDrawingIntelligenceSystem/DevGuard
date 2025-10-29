@@ -19,7 +19,12 @@ NC='\033[0m' # No Color
 # 配置变量
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
-DEPLOY_LOG="/tmp/devguard-deploy.log"
+# 初始化日志文件路径：优先使用 /tmp 的临时文件；失败时回退到项目目录
+if command -v mktemp >/dev/null 2>&1; then
+    DEPLOY_LOG="$(mktemp -t devguard-deploy.XXXXXX.log)"
+else
+    DEPLOY_LOG="$PROJECT_ROOT/devguard-deploy.log"
+fi
 
 # 部署步骤标记
 STEP_SYSTEM=false
@@ -53,6 +58,55 @@ log_banner() {
     echo -e "${CYAN}$1${NC}" | tee -a "$DEPLOY_LOG"
 }
 
+# 将脚本行尾从 CRLF 规范化为 LF（WSL/Windows 兼容）
+normalize_script() {
+    local target="$1"
+    if [[ -f "$target" ]]; then
+        if file "$target" | grep -qi 'CRLF'; then
+            log_info "检测到 CRLF 行尾，正在转换: $target"
+            sed -i 's/\r$//' "$target" || true
+        fi
+    fi
+}
+# 网络诊断
+dump_network_diagnostics() {
+    log_info "—— 网络诊断开始 ——"
+    # 基本信息
+    local ip_addrs
+    ip_addrs=$(hostname -I 2>/dev/null || echo "不可用")
+    log_info "本机 IP: ${ip_addrs}"
+
+    # 默认路由
+    local default_route
+    default_route=$(ip route show default 2>/dev/null || echo "不可用")
+    log_info "默认路由: ${default_route}"
+
+    # DNS 服务器
+    local dns_servers
+    dns_servers=$(grep -E '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' | xargs 2>/dev/null)
+    [[ -z "$dns_servers" ]] && dns_servers="不可用"
+    log_info "DNS 服务器: ${dns_servers}"
+
+    # DNS 解析测试
+    local dns_lookup
+    dns_lookup=$(getent hosts cloudflare.com 2>&1 || true)
+    log_info "DNS 解析 cloudflare.com: ${dns_lookup}"
+
+    # ICMP 连通性
+    local ping_output
+    ping_output=$(ping -c 1 -W 2 1.1.1.1 2>&1 || true)
+    log_info "Ping 1.1.1.1: ${ping_output}"
+
+    # HTTP 出站测试
+    if command -v curl >/dev/null 2>&1; then
+        local curl_head
+        curl_head=$(curl -sS -I --max-time 5 https://cloudflare.com 2>&1 | head -n 1 || true)
+        log_info "HTTP 测试 (curl cloudflare.com): ${curl_head}"
+    fi
+
+    log_info "—— 网络诊断结束 ——"
+}
+
 # 显示横幅
 show_banner() {
     clear
@@ -71,22 +125,45 @@ show_banner() {
 check_system_requirements() {
     log_step "检查系统要求..."
     
+    # 检查执行用户与权限
+    if [[ $EUID -eq 0 ]]; then
+        log_error "请不要以 root 用户直接运行此脚本，建议使用普通用户并具备 sudo 权限"
+        exit 1
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        log_error "未检测到 sudo，请以具备 sudo 权限的普通用户运行"
+        exit 1
+    fi
+
     # 检查操作系统
     if ! grep -q "Ubuntu 22.04" /etc/os-release; then
         log_error "此脚本仅支持 Ubuntu 22.04 LTS"
         exit 1
     fi
     
-    # 检查 root 权限
-    if [[ $EUID -ne 0 ]]; then
-        log_error "请使用 root 权限运行此脚本"
+    # 检查网络连接
+    log_step "检查网络连接..."
+    # 1) ICMP 到公共地址 (Cloudflare 1.1.1.1)
+    if ! ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+        log_error "无法连接公共网络：ICMP 到 1.1.1.1 失败"
+        dump_network_diagnostics
         exit 1
     fi
-    
-    # 检查网络连接
-    if ! ping -c 1 google.com &> /dev/null; then
-        log_error "网络连接检查失败，请确保网络正常"
+
+    # 2) DNS 解析 cloudflare.com
+    if ! getent hosts cloudflare.com >/dev/null 2>&1; then
+        log_error "DNS 解析失败：无法解析 cloudflare.com"
+        dump_network_diagnostics
         exit 1
+    fi
+
+    # 3) HTTPS 出站连通性 (如有 curl)
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -sS -I --max-time 5 https://cloudflare.com >/dev/null 2>&1; then
+            log_error "HTTP 出站连接失败：无法访问 https://cloudflare.com"
+            dump_network_diagnostics
+            exit 1
+        fi
     fi
     
     # 检查磁盘空间
@@ -212,6 +289,7 @@ execute_system_setup() {
     log_step "执行系统基础配置..."
     
     if [[ -f "$PROJECT_ROOT/scripts/01-system-setup.sh" ]]; then
+        normalize_script "$PROJECT_ROOT/scripts/01-system-setup.sh"
         bash "$PROJECT_ROOT/scripts/01-system-setup.sh"
         log_success "系统基础配置完成"
     else
@@ -225,6 +303,7 @@ execute_services_install() {
     log_step "执行应用服务安装..."
     
     if [[ -f "$PROJECT_ROOT/scripts/02-services-install.sh" ]]; then
+        normalize_script "$PROJECT_ROOT/scripts/02-services-install.sh"
         bash "$PROJECT_ROOT/scripts/02-services-install.sh"
         log_success "应用服务安装完成"
     else
@@ -238,6 +317,7 @@ execute_services_config() {
     log_step "执行服务配置..."
     
     if [[ -f "$PROJECT_ROOT/scripts/04-configure-services.sh" ]]; then
+        normalize_script "$PROJECT_ROOT/scripts/04-configure-services.sh"
         bash "$PROJECT_ROOT/scripts/04-configure-services.sh"
         log_success "服务配置完成"
     else
@@ -251,6 +331,7 @@ execute_backup_setup() {
     log_step "执行备份系统配置..."
     
     if [[ -f "$PROJECT_ROOT/scripts/05-setup-backup.sh" ]]; then
+        normalize_script "$PROJECT_ROOT/scripts/05-setup-backup.sh"
         bash "$PROJECT_ROOT/scripts/05-setup-backup.sh"
         log_success "备份系统配置完成"
     else
@@ -264,6 +345,7 @@ execute_runners_setup() {
     log_step "执行 CI/CD Runners 配置..."
     
     if [[ -f "$PROJECT_ROOT/scripts/06-setup-runners.sh" ]]; then
+        normalize_script "$PROJECT_ROOT/scripts/06-setup-runners.sh"
         bash "$PROJECT_ROOT/scripts/06-setup-runners.sh"
         log_success "CI/CD Runners 配置完成"
     else

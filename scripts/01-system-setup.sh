@@ -135,6 +135,29 @@ install_basic_tools() {
     log_success "基础工具安装完成"
 }
 
+# 确保 Docker 与 Compose 已安装（系统更新阶段进行检查与安装）
+ensure_docker_installed() {
+    log_info "检查 Docker 与 Compose 是否已安装..."
+
+    # 检查 Docker
+    if command -v docker >/dev/null 2>&1; then
+        log_info "Docker 已存在: $(docker --version)"
+    else
+        log_warning "未检测到 Docker，开始安装..."
+        install_docker
+    fi
+
+    # 检查 Docker Compose（兼容 v2 插件与独立二进制）
+    if command -v docker-compose >/dev/null 2>&1; then
+        log_info "Docker Compose(独立版) 已存在: $(docker-compose --version)"
+    elif docker compose version >/dev/null 2>&1; then
+        log_info "Docker Compose(v2 插件) 已存在"
+    else
+        log_warning "未检测到 Docker Compose，开始安装..."
+        install_docker_compose
+    fi
+}
+
 # 安装 Docker
 install_docker() {
     log_info "安装 Docker..."
@@ -158,6 +181,15 @@ install_docker() {
     # 将当前用户添加到 docker 组
     sudo usermod -aG docker $USER
     sudo usermod -aG docker devguard
+    
+    # 在 WSL 环境中立即刷新当前用户的组权限
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        log_info "检测到 WSL 环境，刷新用户组权限..."
+        # 尝试刷新当前会话的组权限
+        exec sg docker -c "$0 $*" 2>/dev/null || {
+            log_warning "无法自动刷新权限，请在部署完成后重新登录或运行: newgrp docker"
+        }
+    fi
     
     # 启动并启用 Docker 服务
     sudo systemctl start docker
@@ -336,6 +368,15 @@ EOF
 # 配置 Docker 优化
 configure_docker() {
     log_info "配置 Docker 优化参数..."
+    # 若 Docker 未安装，则尝试安装并在不可用时跳过优化
+    if ! command -v docker >/dev/null 2>&1; then
+        log_warning "未检测到 Docker，尝试安装..."
+        ensure_docker_installed
+        if ! command -v docker >/dev/null 2>&1; then
+            log_warning "仍未检测到 Docker，跳过 Docker 优化配置"
+            return
+        fi
+    fi
     
     sudo mkdir -p /etc/docker
     
@@ -360,8 +401,16 @@ configure_docker() {
 }
 EOF
     
-    # 重启 Docker 服务
-    sudo systemctl restart docker
+    # 重启 Docker 服务（在 systemctl 可用且存在 docker 单元时）
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl list-unit-files | grep -q '^docker\.service'; then
+            sudo systemctl restart docker || log_warning "重启 docker 服务失败，但优化配置已写入"
+        else
+            log_warning "未发现 docker.service，可能运行在非 systemd 环境，跳过重启"
+        fi
+    else
+        log_warning "systemctl 不可用，跳过 Docker 服务重启"
+    fi
     
     log_success "Docker 配置优化完成"
 }
@@ -406,6 +455,7 @@ main() {
     setup_data_directories
     update_system
     install_basic_tools
+    ensure_docker_installed
     
     # 软件安装
     install_docker
