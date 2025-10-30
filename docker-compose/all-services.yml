@@ -1,7 +1,5 @@
-version: '3.8'
-
 # DevGuard 完整服务栈
-# 包含 Gitea、OpenKM 及其依赖服务
+# 包含 Gitea、Nextcloud AIO 及其依赖服务
 
 services:
   # Gitea 代码仓库服务
@@ -22,6 +20,7 @@ services:
       - GITEA__security__INTERNAL_TOKEN=${GITEA_INTERNAL_TOKEN}
       - GITEA__packages__ENABLED=true
       - GITEA__packages__CHUNKED_UPLOAD_PATH=/tmp/gitea-packages
+      - GITEA__packages__CONTAINER__ENABLED=true
       - GITEA__actions__ENABLED=true
       - GITEA__actions__DEFAULT_ACTIONS_URL=https://github.com
       - GITEA__log__MODE=console,file
@@ -32,7 +31,7 @@ services:
       - GITEA__mailer__ENABLED=${GITEA_MAILER_ENABLED:-false}
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
-      - /data/gitea:/data
+      - ./data/gitea:/data
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     ports:
@@ -40,7 +39,7 @@ services:
       - "2222:22"
     restart: unless-stopped
     networks:
-      - devguard-network
+      - devguard-main-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/healthz"]
       interval: 30s
@@ -51,79 +50,50 @@ services:
       - "devguard.service=gitea"
       - "devguard.description=Git repository and package registry"
 
-  # OpenKM 数据库
-  openkm-db:
-    image: mysql:8.0
-    container_name: devguard-openkm-db
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=openkm
-      - MYSQL_USER=openkm
-      - MYSQL_PASSWORD=${OPENKM_DB_PASSWORD}
-      - TZ=${TZ:-Asia/Shanghai}
-    volumes:
-      - /data/openkm/mysql:/var/lib/mysql
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
-    command: 
-      - --default-authentication-plugin=mysql_native_password
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --innodb-buffer-pool-size=256M
-      - --max-connections=200
-      - --innodb-log-file-size=64M
-      - --innodb-flush-log-at-trx-commit=2
-      - --innodb-flush-method=O_DIRECT
+  # Nextcloud AIO 文档管理系统
+  nextcloud-aio-mastercontainer:
+    image: nextcloud/all-in-one:latest
+    container_name: nextcloud-aio-mastercontainer
     restart: unless-stopped
-    networks:
-      - devguard-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    labels:
-      - "devguard.service=openkm-db"
-      - "devguard.description=OpenKM database"
-
-  # OpenKM 文档管理系统
-  openkm:
-    image: openkm/document-management-system:6.3
-    container_name: devguard-openkm
     environment:
-      - INSTALL=true
-      - DB_TYPE=mysql
-      - DB_HOST=openkm-db
-      - DB_NAME=openkm
-      - DB_USER=openkm
-      - DB_PASS=${OPENKM_DB_PASSWORD}
-      - ADMIN_PASSWORD=${OPENKM_ADMIN_PASSWORD:-admin123}
-      - MAX_FILE_SIZE=${OPENKM_MAX_FILE_SIZE:-100}
-      - REPOSITORY_NATIVE=${OPENKM_REPOSITORY_NATIVE:-true}
-      - TZ=${TZ:-Asia/Shanghai}
+      - APACHE_PORT=11000
+      - APACHE_IP_BINDING=0.0.0.0
+      - NEXTCLOUD_DATADIR=/data/nextcloud/data
+      - NEXTCLOUD_MOUNT=/data/nextcloud/mount
+      - NEXTCLOUD_UPLOAD_LIMIT=${NEXTCLOUD_UPLOAD_LIMIT:-10G}
+      - NEXTCLOUD_MAX_TIME=${NEXTCLOUD_MAX_TIME:-3600}
+      - NEXTCLOUD_MEMORY_LIMIT=${NEXTCLOUD_MEMORY_LIMIT:-512M}
+      - NEXTCLOUD_TRUSTED_CACERTS_DIR=/data/nextcloud/trusted-cacerts
+      - NEXTCLOUD_STARTUP_APPS=${NEXTCLOUD_STARTUP_APPS:-deck tasks calendar contacts notes onlyoffice}
+      - NEXTCLOUD_ADDITIONAL_APKS=${NEXTCLOUD_ADDITIONAL_APKS:-imagemagick}
+      - NEXTCLOUD_ADDITIONAL_PHP_EXTENSIONS=${NEXTCLOUD_ADDITIONAL_PHP_EXTENSIONS:-imagick}
+      - ONLYOFFICE_ENABLED=yes
+      - ONLYOFFICE_SECRET=${ONLYOFFICE_SECRET}
+      - TALK_ENABLED=yes
+      - COLLABORA_ENABLED=no
+      - CLAMAV_ENABLED=yes
+      - FULLTEXTSEARCH_ENABLED=yes
+      - IMAGINARY_ENABLED=yes
     volumes:
-      - /data/openkm/data:/var/lib/openkm
-      - /data/openkm/repository:/opt/openkm/repository
-      - /data/openkm/logs:/opt/openkm/logs
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
+      - nextcloud_aio_mastercontainer:/mnt/docker-aio-config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/nextcloud:/data/nextcloud
     ports:
-      - "8080:8080"
-    depends_on:
-      openkm-db:
-        condition: service_healthy
-    restart: unless-stopped
+      - "8888:8080"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
-      - devguard-network
+      - devguard-main-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/OpenKM/login.jsp"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 60s
       timeout: 30s
       retries: 3
       start_period: 120s
     labels:
-      - "devguard.service=openkm"
-      - "devguard.description=Document management system"
+      - "devguard.service=nextcloud-aio"
+      - "devguard.description=Nextcloud All-in-One document management system"
 
   # Redis 缓存服务（可选，用于性能优化）
   redis:
@@ -131,10 +101,10 @@ services:
     container_name: devguard-redis
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
-      - /data/redis:/data
+      - ./data/redis:/data
     restart: unless-stopped
     networks:
-      - devguard-network
+      - devguard-main-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -151,18 +121,18 @@ services:
     image: nginx:alpine
     container_name: devguard-nginx
     volumes:
-      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./configs/nginx/conf.d:/etc/nginx/conf.d:ro
-      - /data/nginx/logs:/var/log/nginx
+      - ../configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../configs/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./data/nginx/logs:/var/log/nginx
     ports:
       - "80:80"
       - "443:443"
     depends_on:
       - gitea
-      - openkm
+      - nextcloud-aio-mastercontainer
     restart: unless-stopped
     networks:
-      - devguard-network
+      - devguard-main-network
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -174,12 +144,47 @@ services:
     profiles:
       - proxy
 
+  # Cloudflare Tunnel 服务（可选，用于安全的外网访问）
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: devguard-cloudflared
+    # 使用 Token 方式（推荐）直接通过 entrypoint 运行
+    # cloudflared 镜像的 entrypoint 是 cloudflared，这里传递子命令参数
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN}
+    volumes:
+      # 只在传统方式时需要配置文件，Token 方式不需要
+      - ../configs/cloudflared:/etc/cloudflared:ro
+    environment:
+      - CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - gitea
+      - nextcloud-aio-mastercontainer
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep cloudflared || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "devguard.service=cloudflared"
+      - "devguard.description=Cloudflare Tunnel for secure external access"
+    profiles:
+      - tunnel
+
 networks:
-  devguard-network:
+  devguard-main-network:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.21.0.0/16
     labels:
       - "devguard.network=main"
 
@@ -193,11 +198,16 @@ volumes:
     labels:
       - "devguard.volume=gitea-data"
   
-  openkm-data:
+  nextcloud_aio_mastercontainer:
+    name: nextcloud_aio_mastercontainer
+    labels:
+      - "devguard.volume=nextcloud-aio-mastercontainer"
+  
+  nextcloud-data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /data/openkm
+      device: /data/nextcloud
     labels:
-      - "devguard.volume=openkm-data"
+      - "devguard.volume=nextcloud-data"
