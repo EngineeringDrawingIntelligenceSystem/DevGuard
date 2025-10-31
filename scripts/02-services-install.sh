@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # DevGuard 应用服务安装脚本
-# 安装 Gitea、OpenKM、Cloudflare Tunnel
+# 安装 Gitea、Nextcloud AIO、Cloudflare Tunnel
 # 作者: DevGuard Team
 # 版本: 1.0
 
@@ -76,7 +76,7 @@ check_prerequisites() {
 create_config_directories() {
     log_info "创建配置目录..."
     
-    mkdir -p "$CONFIGS_DIR"/{gitea,openkm,cloudflared,runners}
+    mkdir -p "$CONFIGS_DIR"/{gitea,nextcloud,cloudflared,runners}
     mkdir -p "$PROJECT_ROOT"/docker-compose
     
     log_success "配置目录创建完成"
@@ -92,8 +92,8 @@ create_env_files() {
     log_info "创建环境变量文件..."
     
     # 生成密码
-    MYSQL_ROOT_PASSWORD=$(generate_password)
-    OPENKM_DB_PASSWORD=$(generate_password)
+    NEXTCLOUD_ADMIN_PASSWORD=$(generate_password)
+    ONLYOFFICE_SECRET=$(openssl rand -base64 32)
     GITEA_SECRET_KEY=$(openssl rand -base64 32)
     GITEA_INTERNAL_TOKEN=$(openssl rand -base64 32)
     
@@ -102,18 +102,19 @@ create_env_files() {
 # DevGuard 环境变量配置
 # 生成时间: $(date)
 
-# 数据库密码
-MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
-OPENKM_DB_PASSWORD=$OPENKM_DB_PASSWORD
+# Nextcloud AIO 配置
+NEXTCLOUD_ADMIN_PASSWORD=$NEXTCLOUD_ADMIN_PASSWORD
+ONLYOFFICE_SECRET=$ONLYOFFICE_SECRET
+NEXTCLOUD_UPLOAD_LIMIT=10G
+NEXTCLOUD_MAX_TIME=3600
+NEXTCLOUD_MEMORY_LIMIT=512M
+NEXTCLOUD_STARTUP_APPS="deck tasks calendar contacts notes onlyoffice"
 
 # Gitea 配置
 GITEA_SECRET_KEY=$GITEA_SECRET_KEY
 GITEA_INTERNAL_TOKEN=$GITEA_INTERNAL_TOKEN
 GITEA_DOMAIN=localhost
 GITEA_ROOT_URL=http://localhost:3000
-
-# OpenKM 配置
-OPENKM_ADMIN_PASSWORD=admin123
 
 # 时区配置
 TZ=Asia/Shanghai
@@ -223,70 +224,48 @@ EOF
     log_success "Gitea Docker Compose 配置创建完成"
 }
 
-# 创建 OpenKM Docker Compose 文件
-create_openkm_compose() {
-    log_info "创建 OpenKM Docker Compose 配置..."
+# 创建 Nextcloud AIO Docker Compose 文件
+create_nextcloud_compose() {
+    log_info "创建 Nextcloud AIO Docker Compose 配置..."
     
-    cat > "$PROJECT_ROOT/docker-compose/openkm.yml" <<'EOF'
+    cat > "$PROJECT_ROOT/docker-compose/nextcloud.yml" <<'EOF'
 version: '3.8'
 
 services:
-  openkm-db:
-    image: mysql:8.0
-    container_name: devguard-openkm-db
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=openkm
-      - MYSQL_USER=openkm
-      - MYSQL_PASSWORD=${OPENKM_DB_PASSWORD}
-      - TZ=${TZ:-Asia/Shanghai}
-    volumes:
-      - /data/openkm/mysql:/var/lib/mysql
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
-    command: 
-      - --default-authentication-plugin=mysql_native_password
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --innodb-buffer-pool-size=256M
-      - --max-connections=200
+  nextcloud-aio-mastercontainer:
+    image: nextcloud/all-in-one:latest
+    container_name: nextcloud-aio-mastercontainer
     restart: unless-stopped
-    networks:
-      - devguard-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  openkm:
-    image: openkm/document-management-system:6.3
-    container_name: devguard-openkm
     environment:
-      - INSTALL=true
-      - DB_TYPE=mysql
-      - DB_HOST=openkm-db
-      - DB_NAME=openkm
-      - DB_USER=openkm
-      - DB_PASS=${OPENKM_DB_PASSWORD}
-      - ADMIN_PASSWORD=${OPENKM_ADMIN_PASSWORD:-admin123}
-      - TZ=${TZ:-Asia/Shanghai}
+      - APACHE_PORT=11000
+      - APACHE_IP_BINDING=0.0.0.0
+      - NEXTCLOUD_DATADIR=/data/nextcloud/data
+      - NEXTCLOUD_MOUNT=/data/nextcloud/mount
+      - NEXTCLOUD_UPLOAD_LIMIT=${NEXTCLOUD_UPLOAD_LIMIT:-10G}
+      - NEXTCLOUD_MAX_TIME=${NEXTCLOUD_MAX_TIME:-3600}
+      - NEXTCLOUD_MEMORY_LIMIT=${NEXTCLOUD_MEMORY_LIMIT:-512M}
+      - NEXTCLOUD_TRUSTED_CACERTS_DIR=/data/nextcloud/trusted-cacerts
+      - NEXTCLOUD_STARTUP_APPS=${NEXTCLOUD_STARTUP_APPS:-deck tasks calendar contacts notes onlyoffice}
+      - NEXTCLOUD_ADDITIONAL_APKS=${NEXTCLOUD_ADDITIONAL_APKS:-imagemagick}
+      - NEXTCLOUD_ADDITIONAL_PHP_EXTENSIONS=${NEXTCLOUD_ADDITIONAL_PHP_EXTENSIONS:-imagick}
+      - ONLYOFFICE_ENABLED=yes
+      - ONLYOFFICE_SECRET=${ONLYOFFICE_SECRET}
+      - TALK_ENABLED=yes
+      - COLLABORA_ENABLED=no
+      - CLAMAV_ENABLED=yes
+      - FULLTEXTSEARCH_ENABLED=yes
+      - IMAGINARY_ENABLED=yes
     volumes:
-      - /data/openkm/data:/var/lib/openkm
-      - /data/openkm/repository:/opt/openkm/repository
-      - /data/openkm/logs:/opt/openkm/logs
-      - /etc/timezone:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
+      - nextcloud_aio_mastercontainer:/mnt/docker-aio-config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/nextcloud:/data/nextcloud
     ports:
       - "8080:8080"
-    depends_on:
-      openkm-db:
-        condition: service_healthy
-    restart: unless-stopped
+      - "11000:11000"
     networks:
       - devguard-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/OpenKM/login.jsp"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 60s
       timeout: 30s
       retries: 3
@@ -295,9 +274,13 @@ services:
 networks:
   devguard-network:
     external: true
+
+volumes:
+  nextcloud_aio_mastercontainer:
+    name: nextcloud_aio_mastercontainer
 EOF
     
-    log_success "OpenKM Docker Compose 配置创建完成"
+    log_success "Nextcloud AIO Docker Compose 配置创建完成"
 }
 
 # 创建 Cloudflare Tunnel 配置模板
@@ -322,7 +305,7 @@ ingress:
     originRequest:
       httpHostHeader: code.YOUR_DOMAIN
   
-  # OpenKM 服务
+  # Nextcloud AIO 服务
   - hostname: docs.YOUR_DOMAIN
     service: http://localhost:8080
     originRequest:
@@ -383,13 +366,13 @@ fi
 echo "启动 Gitea..."
 docker-compose -f "$PROJECT_ROOT/docker-compose/gitea.yml" up -d
 
-# 启动 OpenKM
-echo "启动 OpenKM..."
-docker-compose -f "$PROJECT_ROOT/docker-compose/openkm.yml" up -d
+# 启动 Nextcloud AIO
+echo "启动 Nextcloud AIO..."
+docker-compose -f "$PROJECT_ROOT/docker-compose/nextcloud.yml" up -d
 
 echo "所有服务启动完成！"
 echo "Gitea: http://localhost:3000"
-echo "OpenKM: http://localhost:8080"
+echo "Nextcloud AIO: http://localhost:8080"
 EOF
     
     # 创建停止脚本
@@ -404,9 +387,9 @@ PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 echo "停止 DevGuard 服务..."
 
-# 停止 OpenKM
-echo "停止 OpenKM..."
-docker-compose -f "$PROJECT_ROOT/docker-compose/openkm.yml" down
+# 停止 Nextcloud AIO
+echo "停止 Nextcloud AIO..."
+docker-compose -f "$PROJECT_ROOT/docker-compose/nextcloud.yml" down
 
 # 停止 Gitea
 echo "停止 Gitea..."
@@ -435,10 +418,10 @@ else
     echo "✗ Gitea 服务异常"
 fi
 
-if curl -s http://localhost:8080/OpenKM/login.jsp > /dev/null; then
-    echo "✓ OpenKM 服务正常"
+if curl -s http://localhost:8080 > /dev/null; then
+    echo "✓ Nextcloud AIO 服务正常"
 else
-    echo "✗ OpenKM 服务异常"
+    echo "✗ Nextcloud AIO 服务异常"
 fi
 
 echo
@@ -515,7 +498,7 @@ main() {
     log_success "服务初始化完成！"
     log_info "访问地址:"
     log_info "  Gitea: http://localhost:3000"
-    log_info "  OpenKM: http://localhost:8080 (用户名: okmAdmin, 密码: admin123)"
+    log_info "  Nextcloud AIO: http://localhost:8080 (管理界面)"
     echo
     log_info "下一步: 配置 Cloudflare Tunnel"
     log_info "参考: configs/cloudflared/config.yml.template"
@@ -548,7 +531,7 @@ main() {
     
     # 创建配置文件
     create_gitea_compose
-    create_openkm_compose
+    create_nextcloud_compose
     create_cloudflared_config
     
     # 创建管理脚本

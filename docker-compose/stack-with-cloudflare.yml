@@ -1,0 +1,159 @@
+services:
+  # PostgreSQL for Gitea
+  postgres:
+    image: postgres:15-alpine
+    container_name: devguard-postgres
+    environment:
+      - POSTGRES_DB=${GITEA_DB_NAME:-gitea}
+      - POSTGRES_USER=${GITEA_DB_USER:-gitea}
+      - POSTGRES_PASSWORD=${GITEA_DB_PASS:-gitea_pass}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+
+  # Gitea
+  gitea:
+    image: gitea/gitea:1.21
+    container_name: devguard-gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=devguard-postgres:5432
+      - GITEA__database__NAME=${GITEA_DB_NAME:-gitea}
+      - GITEA__database__USER=${GITEA_DB_USER:-gitea}
+      - GITEA__database__PASSWD=${GITEA_DB_PASS:-gitea_pass}
+      - GITEA__database__SSL_MODE=disable
+      - GITEA__server__DOMAIN=${GITEA_DOMAIN:-localhost}
+      - GITEA__server__ROOT_URL=${GITEA_ROOT_URL:-http://localhost:3000}
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__SSH_PORT=2222
+      - GITEA__server__SSH_LISTEN_PORT=22
+      - GITEA__security__SECRET_KEY=${GITEA_SECRET_KEY}
+      - GITEA__security__INTERNAL_TOKEN=${GITEA_INTERNAL_TOKEN}
+      - GITEA__packages__ENABLED=true
+      - GITEA__actions__ENABLED=true
+      - GITEA__actions__DEFAULT_ACTIONS_URL=https://github.com
+      - GITEA__log__MODE=console,file
+      - GITEA__log__LEVEL=Info
+      - GITEA__log__ROOT_PATH=/data/gitea/logs
+      - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__service__REQUIRE_SIGNIN_VIEW=true
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3000:3000"
+      - "2222:22"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Nextcloud (standard)
+  nextcloud:
+    image: nextcloud:apache
+    container_name: devguard-nextcloud
+    restart: unless-stopped
+    environment:
+      - NEXTCLOUD_TRUSTED_DOMAINS=${NEXTCLOUD_DOMAIN:-cloud.agaistock.xyz}
+      - NEXTCLOUD_TRUSTED_PROXIES=172.21.0.0/16
+      - NEXTCLOUD_OVERWRITEPROTOCOL=https
+      - SQLITE_DATABASE=nextcloud
+      - PHP_UPLOAD_LIMIT=${NEXTCLOUD_UPLOAD_LIMIT:-10G}
+      - PHP_MEMORY_LIMIT=${NEXTCLOUD_MEMORY_LIMIT:-512M}
+    volumes:
+      - ./data/nextcloud/html:/var/www/html
+      - ./data/nextcloud/data:/var/www/html/data
+      - ./data/nextcloud/config:/var/www/html/config
+      - ./data/nextcloud/apps:/var/www/html/custom_apps
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/status.php"]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+
+  # OnlyOffice DocumentServer
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    container_name: devguard-onlyoffice
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=${ONLYOFFICE_SECRET}
+      - JWT_HEADER=Authorization
+    volumes:
+      - ./data/onlyoffice/Data:/var/www/onlyoffice/Data
+      - ./data/onlyoffice/Logs:/var/log/onlyoffice
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: devguard-nginx
+    volumes:
+      - ../configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../configs/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./data/nginx/logs:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - gitea
+      - nextcloud
+      - onlyoffice
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Cloudflare Tunnel
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: devguard-cloudflared
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      - CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - nginx
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+
+networks:
+  devguard-main-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

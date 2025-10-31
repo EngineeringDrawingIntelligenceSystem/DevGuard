@@ -35,7 +35,7 @@ DevGuard 是一个专为初创团队设计的**一体化远程开发支持平台
 ├─────────────────────────────────────────────────────────────┤
 │  💻 核心应用层                                              │
 │  ├─ Gitea: 代码仓库 + CI/CD + 制品管理                      │
-│  └─ OpenKM: 企业文档管理 + 工作流                           │
+│  └─ Nextcloud: 企业协作平台 + 文档管理                      │
 ├─────────────────────────────────────────────────────────────┤
 │  🔧 CI/CD 执行层                                            │
 │  ├─ Build Runners (代码构建)                                │
@@ -43,8 +43,8 @@ DevGuard 是一个专为初创团队设计的**一体化远程开发支持平台
 │  └─ Performance Runners (性能测试)                          │
 ├─────────────────────────────────────────────────────────────┤
 │  💾 数据存储层                                              │
-│  ├─ Git 仓库数据 (SQLite)                                   │
-│  ├─ 文档数据库 (MySQL)                                      │
+│  ├─ Git 仓库数据 (PostgreSQL)                               │
+│  ├─ Nextcloud 数据 (SQLite)                                 │
 │  └─ 文件存储系统                                            │
 ├─────────────────────────────────────────────────────────────┤
 │  🛡️ 安全运维层                                              │
@@ -63,12 +63,12 @@ DevGuard 是一个专为初创团队设计的**一体化远程开发支持平台
 - **制品管理**: Docker 镜像仓库，支持 20+ 包格式 (npm, Maven, PyPI)
 - **CI/CD 集成**: Gitea Actions，自动化构建和部署
 
-### 2. 企业文档管理 (OpenKM)
-- **文档版本控制**: 自动版本管理，变更历史追踪
-- **权限管理**: 细粒度权限控制，部门级访问管理
-- **全文检索**: 支持多种文档格式的内容搜索
-- **工作流引擎**: 文档审批流程，自动化业务流程
-- **集成能力**: WebDAV 协议，Office 在线编辑
+### 2. 企业协作平台 (Nextcloud)
+- **文档协作**: 在线文档编辑，实时协作，版本控制
+- **文件同步**: 跨设备文件同步，离线访问支持
+- **OnlyOffice 集成**: 完整的办公套件，支持 Word、Excel、PowerPoint
+- **团队协作**: 日历、联系人、任务管理，团队聊天 (Talk)
+- **安全特性**: 端到端加密，文件扫描 (ClamAV)，全文搜索
 
 ### 3. 安全访问控制
 - **零信任架构**: 基于 Cloudflare Tunnel，无需 VPN
@@ -167,20 +167,36 @@ DevGuard 是一个专为初创团队设计的**一体化远程开发支持平台
 
 ## 🚀 快速开始
 
-### 一键部署流程
+### 快速部署（Ubuntu 22.04）
 ```bash
-# 1. 下载部署包
+# 1. 克隆项目
 git clone <repository> /opt/devguard
 cd /opt/devguard
 
-# 2. 执行一键部署
-sudo ./deploy.sh
+# 2. 系统准备（安装 Docker/Compose，初始化数据目录）
+sudo ./scripts/setup-ubuntu.sh
 
-# 3. 选择部署模式
-# - 完整部署 (推荐)
-# - 基础部署 (仅核心功能)
-# - 自定义部署 (选择组件)
+# 3. 生成/补齐基础配置 (.env)
+sudo ./scripts/generate-config.sh \
+  -t Asia/Shanghai \
+  -g code.company.com \
+  -r https://code.company.com \
+  -n cloud.company.com
+
+# 4. 启动服务（自动根据 .env 是否存在 Cloudflare Token 选择栈）
+sudo ./scripts/services/compose-start.sh --stack auto
+
+# 5. 停止服务（如需）
+sudo ./scripts/services/compose-stop.sh --stack auto
 ```
+
+### 跨平台说明
+- Ubuntu 脚本：`scripts/setup-ubuntu.sh`, `scripts/generate-config.sh`, `scripts/services/compose-start.sh`, `scripts/services/compose-stop.sh`
+- Windows 等效脚本：`scripts/setup-system.ps1`, `scripts/generate-config.ps1`, `scripts/services/compose-start.ps1`, `scripts/services/compose-stop.ps1`
+
+### Compose 文件
+- 带 Cloudflare：`docker-compose/stack-with-cloudflare.yml`
+- 不带 Cloudflare：`docker-compose/stack-no-cloudflare.yml`
 
 ### 部署后配置
 1. **域名配置**: 设置 git.company.com, docs.company.com
@@ -221,7 +237,7 @@ sudo ./deploy.sh
 - **[系统要求](./SYSTEM_REQUIREMENTS.md)**: 详细的硬件和软件配置要求
 - **[部署指南](./DEPLOYMENT_GUIDE.md)**: 完整的部署和配置流程
 - **[架构说明](./ARCHITECTURE_NOTES.md)**: 技术架构和安全配置详解
-- **[使用手册](./README_DEPLOYMENT.md)**: 用户操作和管理指南
+- 说明：Cloudflare Tunnel 的配置说明已合并进部署指南；原“使用手册”文档已并入本 README 与部署指南。
 
 ---
 

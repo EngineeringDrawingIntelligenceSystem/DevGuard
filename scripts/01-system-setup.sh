@@ -89,7 +89,7 @@ setup_data_directories() {
     fi
     
     # 创建目录结构
-    sudo mkdir -p /data/{gitea/{data,config,logs},openkm/{data,repository,mysql,logs},cloudflared,runners,backups,configs}
+    sudo mkdir -p /data/{gitea/{data,config,logs},nextcloud/{data,mount,trusted-cacerts},cloudflared,runners,backups,configs}
     
     # 设置权限
     sudo chown -R devguard:devguard /data

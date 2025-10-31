@@ -105,8 +105,7 @@ BACKUP_BASE_DIR="$BACKUP_DIR"
 ENCRYPTION_KEY_FILE="$PROJECT_ROOT/.backup_key"
 
 # 数据库配置
-MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
-OPENKM_DB_PASSWORD="$OPENKM_DB_PASSWORD"
+NEXTCLOUD_ADMIN_PASSWORD="$NEXTCLOUD_ADMIN_PASSWORD"
 
 # 保留策略
 DAILY_RETENTION=7      # 保留7天的日备份
@@ -228,39 +227,41 @@ backup_gitea() {
     echo "$backup_file.enc"
 }
 
-# 备份 OpenKM 数据库
-backup_openkm_db() {
-    log_info "开始备份 OpenKM 数据库..."
+# 备份 Nextcloud 数据
+backup_nextcloud_data() {
+    log_info "开始备份 Nextcloud 数据..."
     
-    local backup_file="$BACKUP_DIR/openkm-db-$(date +%Y%m%d_%H%M%S).sql"
+    local backup_file="$BACKUP_DIR/nextcloud-data-$(date +%Y%m%d_%H%M%S).tar.gz"
     
-    # 备份数据库
-    docker exec devguard-openkm-db mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" \
-        --single-transaction --routines --triggers openkm > "$backup_file"
+    # 停止 Nextcloud 容器以确保数据一致性
+    docker stop nextcloud-aio-mastercontainer || true
     
-    # 压缩备份文件
-    gzip -"$COMPRESSION_LEVEL" "$backup_file"
+    # 备份 Nextcloud 数据目录
+    tar -czf "$backup_file" -C /data/nextcloud data
     
-    # 加密备份文件
-    encrypt_file "$backup_file.gz" "$backup_file.gz.enc" "$ENCRYPTION_KEY_FILE"
-    
-    log_success "OpenKM 数据库备份完成: $(basename "$backup_file.gz.enc")"
-    echo "$backup_file.gz.enc"
-}
-
-# 备份 OpenKM 文档仓库
-backup_openkm_repository() {
-    log_info "开始备份 OpenKM 文档仓库..."
-    
-    local backup_file="$BACKUP_DIR/openkm-repo-$(date +%Y%m%d_%H%M%S).tar.gz"
-    
-    # 备份文档仓库
-    tar -czf "$backup_file" -C /data/openkm repository
+    # 重新启动 Nextcloud 容器
+    docker start nextcloud-aio-mastercontainer || true
     
     # 加密备份文件
     encrypt_file "$backup_file" "$backup_file.enc" "$ENCRYPTION_KEY_FILE"
     
-    log_success "OpenKM 文档仓库备份完成: $(basename "$backup_file.enc")"
+    log_success "Nextcloud 数据备份完成: $(basename "$backup_file.enc")"
+    echo "$backup_file.enc"
+}
+
+# 备份 Nextcloud 配置
+backup_nextcloud_config() {
+    log_info "开始备份 Nextcloud 配置..."
+    
+    local backup_file="$BACKUP_DIR/nextcloud-config-$(date +%Y%m%d_%H%M%S).tar.gz"
+    
+    # 备份 Nextcloud 配置和挂载目录
+    tar -czf "$backup_file" -C /data/nextcloud mount trusted-cacerts
+    
+    # 加密备份文件
+    encrypt_file "$backup_file" "$backup_file.enc" "$ENCRYPTION_KEY_FILE"
+    
+    log_success "Nextcloud 配置备份完成: $(basename "$backup_file.enc")"
     echo "$backup_file.enc"
 }
 
@@ -352,8 +353,8 @@ main_backup() {
     
     # 执行备份
     backup_files+=($(backup_gitea))
-    backup_files+=($(backup_openkm_db))
-    backup_files+=($(backup_openkm_repository))
+    backup_files+=($(backup_nextcloud_data))
+    backup_files+=($(backup_nextcloud_config))
     backup_files+=($(backup_configs))
     
     # 验证备份
@@ -511,60 +512,73 @@ restore_gitea() {
     log_success "Gitea 数据恢复完成"
 }
 
-# 恢复 OpenKM 数据库
-restore_openkm_db() {
+# 恢复 Nextcloud 数据
+restore_nextcloud_data() {
     local backup_file="$1"
     
-    log_info "恢复 OpenKM 数据库..."
+    log_info "恢复 Nextcloud 数据..."
+    
+    # 停止 Nextcloud 服务
+    docker stop nextcloud-aio-mastercontainer || true
     
     # 解密备份文件
-    local decrypted_file="/tmp/openkm-db-restore.sql.gz"
+    local decrypted_file="/tmp/nextcloud-data-restore.tar.gz"
     decrypt_file "$backup_file" "$decrypted_file" "$ENCRYPTION_KEY_FILE"
     
-    # 解压备份文件
-    gunzip "$decrypted_file"
-    local sql_file="/tmp/openkm-db-restore.sql"
-    
-    # 恢复数据库
-    docker exec -i devguard-openkm-db mysql -u root -p"$MYSQL_ROOT_PASSWORD" openkm < "$sql_file"
-    
-    # 清理临时文件
-    rm -f "$sql_file"
-    
-    log_success "OpenKM 数据库恢复完成"
-}
-
-# 恢复 OpenKM 文档仓库
-restore_openkm_repository() {
-    local backup_file="$1"
-    
-    log_info "恢复 OpenKM 文档仓库..."
-    
-    # 停止 OpenKM 服务
-    docker stop devguard-openkm || true
-    
-    # 解密备份文件
-    local decrypted_file="/tmp/openkm-repo-restore.tar.gz"
-    decrypt_file "$backup_file" "$decrypted_file" "$ENCRYPTION_KEY_FILE"
-    
-    # 备份当前仓库
-    if [[ -d "/data/openkm/repository" ]]; then
-        mv /data/openkm/repository /data/openkm/repository.backup.$(date +%Y%m%d_%H%M%S)
+    # 备份当前数据
+    if [[ -d "/data/nextcloud/data" ]]; then
+        mv /data/nextcloud/data /data/nextcloud/data.backup.$(date +%Y%m%d_%H%M%S)
     fi
     
-    # 恢复文档仓库
-    tar -xzf "$decrypted_file" -C /data/openkm
+    # 恢复数据
+    tar -xzf "$decrypted_file" -C /data/nextcloud
     
     # 设置权限
-    chown -R 1000:1000 /data/openkm/repository
+    chown -R 33:33 /data/nextcloud/data
     
-    # 启动 OpenKM 服务
-    docker start devguard-openkm
+    # 启动 Nextcloud 服务
+    docker start nextcloud-aio-mastercontainer
     
     # 清理临时文件
     rm -f "$decrypted_file"
     
-    log_success "OpenKM 文档仓库恢复完成"
+    log_success "Nextcloud 数据恢复完成"
+}
+
+# 恢复 Nextcloud 配置
+restore_nextcloud_config() {
+    local backup_file="$1"
+    
+    log_info "恢复 Nextcloud 配置..."
+    
+    # 停止 Nextcloud 服务
+    docker stop nextcloud-aio-mastercontainer || true
+    
+    # 解密备份文件
+    local decrypted_file="/tmp/nextcloud-config-restore.tar.gz"
+    decrypt_file "$backup_file" "$decrypted_file" "$ENCRYPTION_KEY_FILE"
+    
+    # 备份当前配置
+    if [[ -d "/data/nextcloud/mount" ]]; then
+        mv /data/nextcloud/mount /data/nextcloud/mount.backup.$(date +%Y%m%d_%H%M%S)
+    fi
+    if [[ -d "/data/nextcloud/trusted-cacerts" ]]; then
+        mv /data/nextcloud/trusted-cacerts /data/nextcloud/trusted-cacerts.backup.$(date +%Y%m%d_%H%M%S)
+    fi
+    
+    # 恢复配置
+    tar -xzf "$decrypted_file" -C /data/nextcloud
+    
+    # 设置权限
+    chown -R 33:33 /data/nextcloud/mount /data/nextcloud/trusted-cacerts
+    
+    # 启动 Nextcloud 服务
+    docker start nextcloud-aio-mastercontainer
+    
+    # 清理临时文件
+    rm -f "$decrypted_file"
+    
+    log_success "Nextcloud 配置恢复完成"
 }
 
 # 恢复配置文件
@@ -617,8 +631,8 @@ interactive_restore() {
     # 选择要恢复的组件
     echo "请选择要恢复的组件:"
     echo "1) Gitea 数据"
-    echo "2) OpenKM 数据库"
-    echo "3) OpenKM 文档仓库"
+    echo "2) Nextcloud 数据"
+    echo "3) Nextcloud 配置"
     echo "4) 配置文件"
     echo "5) 全部恢复"
     read -p "请输入选择 (1-5): " component_choice
@@ -640,12 +654,12 @@ interactive_restore() {
             restore_gitea "$gitea_backup"
             ;;
         2)
-            read -p "请输入 OpenKM 数据库备份文件路径: " db_backup
-            restore_openkm_db "$db_backup"
+            read -p "请输入 Nextcloud 数据备份文件路径: " data_backup
+            restore_nextcloud_data "$data_backup"
             ;;
         3)
-            read -p "请输入 OpenKM 文档仓库备份文件路径: " repo_backup
-            restore_openkm_repository "$repo_backup"
+            read -p "请输入 Nextcloud 配置备份文件路径: " config_backup
+            restore_nextcloud_config "$config_backup"
             ;;
         4)
             read -p "请输入配置文件备份路径: " config_backup
@@ -677,17 +691,17 @@ main() {
             gitea)
                 restore_gitea "$2"
                 ;;
-            openkm-db)
-                restore_openkm_db "$2"
+            nextcloud-data)
+                restore_nextcloud_data "$2"
                 ;;
-            openkm-repo)
-                restore_openkm_repository "$2"
+            nextcloud-config)
+                restore_nextcloud_config "$2"
                 ;;
             configs)
                 restore_configs "$2"
                 ;;
             *)
-                echo "用法: $0 [list|gitea|openkm-db|openkm-repo|configs] [backup_file]"
+                echo "用法: $0 [list|gitea|nextcloud-data|nextcloud-config|configs] [backup_file]"
                 echo "或直接运行 $0 进入交互模式"
                 exit 1
                 ;;
@@ -712,7 +726,7 @@ setup_cron_jobs() {
 # 每日凌晨 2:00 执行完整备份
 0 2 * * * $BACKUP_SCRIPTS_DIR/backup.sh daily >> $BACKUP_DIR/logs/cron.log 2>&1
 
-# 每周日凌晨 3:00 执行周备份
+# 每周凌晨 3:00 执行周备份
 0 3 * * 0 $BACKUP_SCRIPTS_DIR/backup.sh weekly >> $BACKUP_DIR/logs/cron.log 2>&1
 
 # 每月1号凌晨 4:00 执行月备份

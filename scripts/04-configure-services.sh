@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # DevGuard 应用服务配置脚本
-# 按顺序配置: Cloudflare Tunnel -> Gitea -> OpenKM -> Runners
+# 按顺序配置: Cloudflare Tunnel -> Gitea -> Nextcloud AIO -> Runners
 # 作者: DevGuard Team
 # 版本: 1.0
 
@@ -62,13 +62,85 @@ check_prerequisites() {
 configure_cloudflare_tunnel() {
     log_info "配置 Cloudflare Tunnel..."
     
-    echo "请按照以下步骤配置 Cloudflare Tunnel:"
+    echo "请选择 Cloudflare Tunnel 配置方式:"
+    echo "1) Token 方式 (推荐) - 使用 Cloudflare 提供的 Docker 命令中的 token"
+    echo "2) 传统方式 - 使用 Tunnel ID 和凭证文件"
     echo
+    
+    read -p "请选择配置方式 (1-2): " config_method
+    
+    case $config_method in
+        1)
+            configure_cloudflare_tunnel_token
+            ;;
+        2)
+            configure_cloudflare_tunnel_traditional
+            ;;
+        *)
+            log_error "无效选择"
+            return 1
+            ;;
+    esac
+}
+
+# Token 方式配置 Cloudflare Tunnel
+configure_cloudflare_tunnel_token() {
+    log_info "使用 Token 方式配置 Cloudflare Tunnel..."
+    
+    echo "请按照以下步骤获取 Tunnel Token:"
     echo "1. 登录 Cloudflare Dashboard"
     echo "2. 选择你的域名"
     echo "3. 进入 Zero Trust -> Access -> Tunnels"
-    echo "4. 创建新的 Tunnel"
+    echo "4. 创建新的 Tunnel，选择 'Cloudflared'"
+    echo "5. 在 'Install and run a connector' 页面，复制 Docker 命令中的 --token 参数"
     echo
+    echo "示例 Docker 命令:"
+    echo "docker run cloudflare/cloudflared:latest tunnel --no-autoupdate run --token eyJhIjoiN2ExMTcxYWQ1ZDRlZGNhNTI1NzdiNDg4ZDQ4NGMzOTciLCJ0IjoiODkwMDFmYjAtOTY1Yi00MmJkLWE3ZjEtNjU3ZDUxMjAzMWFmIiwicyI6Ik9USmhabVEzWXpZdFlXSmlOUzAwTlRGaExUbGlOVGN0TkRreE16VmxPVGsyTW1ZeCJ9"
+    echo
+    
+    read -p "请输入你的域名 (例如: example.com): " DOMAIN
+    if [[ -z "$DOMAIN" ]]; then
+        log_error "域名不能为空"
+        return 1
+    fi
+    
+    read -p "请输入 Tunnel Token (从 Docker 命令中复制): " TUNNEL_TOKEN
+    if [[ -z "$TUNNEL_TOKEN" ]]; then
+        log_error "Tunnel Token 不能为空"
+        return 1
+    fi
+    
+    # 更新环境变量文件
+    if grep -q "CLOUDFLARE_TUNNEL_TOKEN=" "$PROJECT_ROOT/.env"; then
+        sed -i "s|CLOUDFLARE_TUNNEL_TOKEN=.*|CLOUDFLARE_TUNNEL_TOKEN=$TUNNEL_TOKEN|" "$PROJECT_ROOT/.env"
+    else
+        echo "CLOUDFLARE_TUNNEL_TOKEN=$TUNNEL_TOKEN" >> "$PROJECT_ROOT/.env"
+    fi
+    
+    # 更新域名配置
+    sed -i "s|GITEA_ROOT_URL=.*|GITEA_ROOT_URL=https://code.$DOMAIN|" "$PROJECT_ROOT/.env"
+    
+    echo
+    log_success "Tunnel Token 配置完成"
+    log_info "请在 Cloudflare Dashboard 中配置以下公共主机名:"
+    echo "  code.$DOMAIN -> http://localhost:3000"
+    echo "  docs.$DOMAIN -> http://localhost:8080"
+    echo
+    
+    read -p "是否已在 Cloudflare Dashboard 中配置了公共主机名? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_success "Cloudflare Tunnel Token 配置完成"
+        return 0
+    else
+        log_warning "请先在 Cloudflare Dashboard 中配置公共主机名后再继续"
+        return 1
+    fi
+}
+
+# 传统方式配置 Cloudflare Tunnel
+configure_cloudflare_tunnel_traditional() {
+    log_info "使用传统方式配置 Cloudflare Tunnel..."
     
     read -p "请输入你的域名 (例如: example.com): " DOMAIN
     if [[ -z "$DOMAIN" ]]; then
@@ -97,7 +169,7 @@ ingress:
     originRequest:
       httpHostHeader: code.$DOMAIN
   
-  # OpenKM 服务
+  # Nextcloud AIO 服务
   - hostname: docs.$DOMAIN
     service: http://localhost:8080
     originRequest:
@@ -121,10 +193,9 @@ EOF
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         # 更新环境变量
-        sed -i "s/GITEA_DOMAIN=.*/GITEA_DOMAIN=code.$DOMAIN/" "$PROJECT_ROOT/.env"
         sed -i "s|GITEA_ROOT_URL=.*|GITEA_ROOT_URL=https://code.$DOMAIN|" "$PROJECT_ROOT/.env"
         
-        log_success "Cloudflare Tunnel 配置完成"
+        log_success "Cloudflare Tunnel 传统配置完成"
         
         # 提示下载凭证文件
         echo
@@ -132,6 +203,7 @@ EOF
         log_warning "  /etc/cloudflared/$TUNNEL_ID.json"
         echo
         read -p "按回车键继续..."
+        return 0
     else
         log_warning "请先添加 DNS 记录后再继续"
         return 1
@@ -140,10 +212,22 @@ EOF
 
 # 启动 Cloudflare Tunnel 服务
 start_cloudflare_tunnel() {
-    log_info "启动 Cloudflare Tunnel 服务..."
+    log_info "准备 Cloudflare Tunnel 服务..."
     
-    # 创建 systemd 服务文件
-    sudo tee /etc/systemd/system/cloudflared.service > /dev/null <<'EOF'
+    # 检查是否配置了 Token 方式
+    source "$PROJECT_ROOT/.env"
+    
+    if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]]; then
+        # Token 方式：通过 docker-compose 启动
+        log_info "Cloudflare Tunnel 将通过 docker-compose 启动（Token 方式）"
+        log_success "Cloudflare Tunnel Token 配置完成，服务将在 docker-compose 启动时自动运行"
+        
+    elif [[ -f "/etc/cloudflared/config.yml" ]]; then
+        # 传统方式：使用 systemd 服务启动
+        log_info "使用传统方式启动 Cloudflare Tunnel..."
+        
+        # 创建 systemd 服务文件
+        sudo tee /etc/systemd/system/cloudflared.service > /dev/null <<'EOF'
 [Unit]
 Description=Cloudflare Tunnel
 After=network.target
@@ -158,19 +242,23 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOF
-    
-    # 启动服务
-    sudo systemctl daemon-reload
-    sudo systemctl enable cloudflared
-    sudo systemctl start cloudflared
-    
-    # 检查服务状态
-    sleep 5
-    if sudo systemctl is-active --quiet cloudflared; then
-        log_success "Cloudflare Tunnel 服务启动成功"
+        
+        # 启动服务
+        sudo systemctl daemon-reload
+        sudo systemctl enable cloudflared
+        sudo systemctl start cloudflared
+        
+        # 检查服务状态
+        sleep 5
+        if sudo systemctl is-active --quiet cloudflared; then
+            log_success "Cloudflare Tunnel 服务启动成功"
+        else
+            log_error "Cloudflare Tunnel 服务启动失败"
+            sudo systemctl status cloudflared
+            return 1
+        fi
     else
-        log_error "Cloudflare Tunnel 服务启动失败"
-        sudo systemctl status cloudflared
+        log_error "未找到 Cloudflare Tunnel 配置，请先运行配置步骤"
         return 1
     fi
 }
@@ -227,46 +315,59 @@ configure_gitea() {
     log_success "Gitea 配置完成"
 }
 
-# 配置 OpenKM
-configure_openkm() {
-    log_info "配置 OpenKM..."
+# 配置 Nextcloud AIO
+configure_nextcloud() {
+    log_info "配置 Nextcloud AIO..."
     
-    # 等待 OpenKM 完全启动
-    log_info "等待 OpenKM 服务启动..."
-    for i in {1..60}; do
-        if curl -s http://localhost:8080/OpenKM/login.jsp > /dev/null; then
+    # 等待 Nextcloud AIO 完全启动
+    log_info "等待 Nextcloud AIO 服务启动..."
+    for i in {1..120}; do
+        if curl -s http://localhost:8080 > /dev/null; then
             break
         fi
         sleep 5
     done
     
-    # 检查 OpenKM 状态
-    if curl -s http://localhost:8080/OpenKM/login.jsp > /dev/null; then
-        log_success "OpenKM 服务运行正常"
+    # 检查 Nextcloud AIO 状态
+    if curl -s http://localhost:8080 > /dev/null; then
+        log_success "Nextcloud AIO 服务运行正常"
         
         echo
-        echo "OpenKM 访问信息:"
+        echo "Nextcloud AIO 访问信息:"
         if [[ -n "$GITEA_DOMAIN" && "$GITEA_DOMAIN" != "localhost" ]]; then
-            echo "  URL: https://docs.${GITEA_DOMAIN#code.}"
+            echo "  管理界面: https://docs.${GITEA_DOMAIN#code.}"
         else
-            echo "  URL: http://localhost:8080/OpenKM"
+            echo "  管理界面: http://localhost:8080"
         fi
-        echo "  管理员用户: okmAdmin"
-        echo "  管理员密码: ${OPENKM_ADMIN_PASSWORD:-admin123}"
+        echo "  Nextcloud 实例: http://localhost:11000 (启动后)"
         echo
         
-        log_info "建议配置:"
-        echo "  1. 登录后修改管理员密码"
-        echo "  2. 配置用户和角色"
-        echo "  3. 设置文档分类和工作流"
-        echo "  4. 配置邮件通知"
+        log_info "初始化步骤:"
+        echo "  1. 访问管理界面 http://localhost:8080"
+        echo "  2. 设置管理员密码和域名"
+        echo "  3. 启用所需的应用 (OnlyOffice 已预配置)"
+        echo "  4. 配置 SSL 证书 (可选)"
+        echo "  5. 启动 Nextcloud 实例"
+        echo
+        
+        log_info "OnlyOffice 集成:"
+        echo "  - OnlyOffice 已启用并预配置"
+        echo "  - 支持在线编辑 Word、Excel、PowerPoint 文档"
+        echo "  - 协作编辑功能已启用"
+        echo
+        
+        log_info "其他功能:"
+        echo "  - Talk (视频会议) 已启用"
+        echo "  - ClamAV (病毒扫描) 已启用"
+        echo "  - 全文搜索已启用"
+        echo "  - Imaginary (图片处理) 已启用"
         echo
     else
-        log_error "OpenKM 服务启动失败"
+        log_error "Nextcloud AIO 服务启动失败"
         return 1
     fi
     
-    log_success "OpenKM 配置完成"
+    log_success "Nextcloud AIO 配置完成"
 }
 
 # 配置 CI/CD Runners
@@ -362,12 +463,11 @@ main() {
     
     # 检查 Docker 容器
     check_docker_container "devguard-gitea"
-    check_docker_container "devguard-openkm"
-    check_docker_container "devguard-openkm-db"
+    check_docker_container "nextcloud-aio-mastercontainer"
     
     # 检查服务可用性
     check_service "Gitea" "http://localhost:3000/api/healthz"
-    check_service "OpenKM" "http://localhost:8080/OpenKM/login.jsp"
+    check_service "Nextcloud AIO" "http://localhost:8080/"
     
     # 检查系统资源
     MEMORY_USAGE=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}')
@@ -414,28 +514,27 @@ generate_config_report() {
 
 ### 核心服务
 - **Gitea**: $(docker ps --format "{{.Status}}" --filter "name=devguard-gitea")
-- **OpenKM**: $(docker ps --format "{{.Status}}" --filter "name=devguard-openkm")
-- **OpenKM DB**: $(docker ps --format "{{.Status}}" --filter "name=devguard-openkm-db")
+- **Nextcloud AIO**: $(docker ps --format "{{.Status}}" --filter "name=nextcloud-aio-mastercontainer")
 
 ### 访问地址
 EOF
     
     if [[ -n "$GITEA_DOMAIN" && "$GITEA_DOMAIN" != "localhost" ]]; then
         echo "- **Gitea**: https://code.$GITEA_DOMAIN" >> "$REPORT_FILE"
-        echo "- **OpenKM**: https://docs.${GITEA_DOMAIN#code.}" >> "$REPORT_FILE"
+        echo "- **Nextcloud AIO**: https://docs.${GITEA_DOMAIN#code.}" >> "$REPORT_FILE"
     else
         echo "- **Gitea**: http://localhost:3000" >> "$REPORT_FILE"
-        echo "- **OpenKM**: http://localhost:8080/OpenKM" >> "$REPORT_FILE"
+        echo "- **Nextcloud AIO**: http://localhost:8080" >> "$REPORT_FILE"
     fi
     
     cat >> "$REPORT_FILE" <<EOF
 
 ### 默认凭据
-- **OpenKM 管理员**: okmAdmin / ${OPENKM_ADMIN_PASSWORD:-admin123}
+- **Nextcloud 管理员**: admin / ${NEXTCLOUD_ADMIN_PASSWORD:-admin123}
 
 ## 📁 数据目录
 - **Gitea 数据**: /data/gitea
-- **OpenKM 数据**: /data/openkm
+- **Nextcloud 数据**: /data/nextcloud
 - **备份目录**: /data/backups
 
 ## 🔧 管理命令
@@ -446,7 +545,7 @@ EOF
 
 ## 📝 下一步操作
 1. 配置 Gitea 管理员账户
-2. 设置 OpenKM 用户和权限
+2. 设置 Nextcloud 用户和权限，配置 OnlyOffice 集成
 3. 配置备份策略
 4. 设置 CI/CD 流水线
 5. 配置监控告警
@@ -476,15 +575,27 @@ main() {
     
     # 配置服务（按顺序）
     echo "=== 1. 配置 Cloudflare Tunnel ==="
-    configure_cloudflare_tunnel && start_cloudflare_tunnel
+    if configure_cloudflare_tunnel; then
+        start_cloudflare_tunnel
+        
+        # 如果配置了 Token 方式，需要重新启动所有服务以包含 Cloudflare
+        source "$PROJECT_ROOT/.env"
+        if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]]; then
+            log_info "重新启动所有服务以包含 Cloudflare Tunnel..."
+            "$PROJECT_ROOT/scripts/services/stop-all.sh" || true
+            sleep 5
+            "$PROJECT_ROOT/scripts/services/start-all.sh"
+            log_success "服务重启完成，Cloudflare Tunnel 已集成"
+        fi
+    fi
     
     echo
     echo "=== 2. 配置 Gitea ==="
     configure_gitea
     
     echo
-    echo "=== 3. 配置 OpenKM ==="
-    configure_openkm
+    echo "=== 3. 配置 Nextcloud AIO ==="
+    configure_nextcloud
     
     echo
     echo "=== 4. 配置 CI/CD Runners ==="
