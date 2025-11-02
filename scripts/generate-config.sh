@@ -16,22 +16,24 @@ TZ_DEFAULT="Asia/Shanghai"
 GITEA_DOMAIN_DEFAULT="localhost"
 GITEA_ROOT_URL_DEFAULT="http://localhost:3000"
 NEXTCLOUD_DOMAIN_DEFAULT="cloud.local"
+ONLYOFFICE_DOMAIN_DEFAULT="office.local"
 
 usage(){
   cat <<EOF
-用法: $0 [-t TZ] [-g GITEA_DOMAIN] [-r GITEA_ROOT_URL] [-n NEXTCLOUD_DOMAIN]
+用法: $0 [-t TZ] [-g GITEA_DOMAIN] [-r GITEA_ROOT_URL] [-n NEXTCLOUD_DOMAIN] [-o ONLYOFFICE_DOMAIN]
 
 示例:
-  $0 -t Asia/Shanghai -g code.local -r http://code.local:3000 -n cloud.local
+  $0 -t Asia/Shanghai -g code.local -r http://code.local:3000 -n cloud.local -o office.local
 EOF
 }
 
-while getopts ":t:g:r:n:h" opt; do
+while getopts ":t:g:r:n:o:h" opt; do
   case "$opt" in
     t) TZ_DEFAULT="$OPTARG" ;;
     g) GITEA_DOMAIN_DEFAULT="$OPTARG" ;;
     r) GITEA_ROOT_URL_DEFAULT="$OPTARG" ;;
     n) NEXTCLOUD_DOMAIN_DEFAULT="$OPTARG" ;;
+    o) ONLYOFFICE_DOMAIN_DEFAULT="$OPTARG" ;;
     h) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -67,9 +69,12 @@ ensure "GITEA_INTERNAL_TOKEN" "$(rand)"
 ensure "NEXTCLOUD_DOMAIN" "$NEXTCLOUD_DOMAIN_DEFAULT"
 ensure "NEXTCLOUD_UPLOAD_LIMIT" "10G"
 ensure "NEXTCLOUD_MEMORY_LIMIT" "512M"
+ensure "NEXTCLOUD_ADMIN_USER" "admin"
+ensure "NEXTCLOUD_ADMIN_PASSWORD" "$(rand)"
 
 # OnlyOffice
 ensure "ONLYOFFICE_SECRET" "$(rand)"
+ensure "ONLYOFFICE_DOMAIN" "$ONLYOFFICE_DOMAIN_DEFAULT"
 
 # Cloudflare（可选）
 ensure "CLOUDFLARE_TUNNEL_TOKEN" ""

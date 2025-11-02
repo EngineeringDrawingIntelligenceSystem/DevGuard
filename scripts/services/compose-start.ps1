@@ -59,4 +59,6 @@ Write-Info "当前容器状态:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | Select-String -Pattern 'devguard' -Quiet | Out-Null
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
+Write-Info "开始自动配置 Nextcloud 与 ONLYOFFICE..."
+& (Join-Path $Root 'scripts/configure-nextcloud-onlyoffice.ps1') -Quiet
 Write-Ok "完成"

@@ -55,3 +55,8 @@ log_ok "容器已启动"
 
 log_info "当前容器状态:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep devguard || true
+
+# 自动配置 Nextcloud + ONLYOFFICE（等待与安装/配置）
+log_info "开始自动配置 Nextcloud 与 ONLYOFFICE..."
+"$PROJECT_ROOT/scripts/configure-nextcloud-onlyoffice.sh" || log_warn "Nextcloud/ONLYOFFICE 自动配置脚本执行时出现警告/错误，请检查日志"
+log_ok "自动配置步骤已完成"

@@ -3,6 +3,7 @@ Param(
     [string]$GiteaDomain = 'localhost',
     [string]$GiteaRootUrl = 'http://localhost:3000',
     [string]$NextcloudDomain = 'cloud.local',
+    [string]$OnlyofficeDomain,
     [switch]$Force
 )
 
@@ -59,9 +60,21 @@ Ensure 'GITEA_INTERNAL_TOKEN' (New-Secret 32)
 Ensure 'NEXTCLOUD_DOMAIN' $NextcloudDomain
 Ensure 'NEXTCLOUD_UPLOAD_LIMIT' '10G'
 Ensure 'NEXTCLOUD_MEMORY_LIMIT' '512M'
+Ensure 'NEXTCLOUD_ADMIN_USER' 'admin'
+Ensure 'NEXTCLOUD_ADMIN_PASSWORD' (New-Secret 24)
 
 # OnlyOffice
 Ensure 'ONLYOFFICE_SECRET' (New-Secret 32)
+
+# ONLYOFFICE 域名（默认从 Nextcloud 域名推导：cloud.xxx -> office.xxx）
+if (-not $OnlyofficeDomain -or $OnlyofficeDomain.Trim().Length -eq 0) {
+    if ($NextcloudDomain -match '^cloud\.(.+)$') {
+        $OnlyofficeDomain = "office.$($Matches[1])"
+    } else {
+        $OnlyofficeDomain = 'office.local'
+    }
+}
+Ensure 'ONLYOFFICE_DOMAIN' $OnlyofficeDomain
 
 # Cloudflare (可选，默认空)
 Ensure 'CLOUDFLARE_TUNNEL_TOKEN' ''
