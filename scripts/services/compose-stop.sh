@@ -2,9 +2,10 @@
 
 set -euo pipefail
 
-BLUE='\033[0;34m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+BLUE='\033[0;34m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log_info(){ echo -e "${BLUE}[INFO]${NC} $1"; }
 log_ok(){ echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn(){ echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err(){ echo -e "${RED}[ERR]${NC} $1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -45,5 +46,14 @@ case "$STACK" in
 esac
 
 log_info "停止服务容器..."
-$compose_cmd -f "$compose_file" --env-file "$ENV_PATH" down
+# WSL + Windows 驱动盘路径下也叠加覆盖，保持与启动一致
+IS_WSL="false"
+if [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then IS_WSL="true"; fi
+OVERRIDE_FILE="$PROJECT_ROOT/docker-compose/windows-overrides.yml"
+if [[ "$IS_WSL" == "true" && "$PROJECT_ROOT" == /mnt/* && -f "$OVERRIDE_FILE" ]]; then
+  log_warn "检测到 WSL 且项目位于 Windows 驱动器 (/mnt/*)。应用 windows-overrides.yml 与启动一致。"
+  $compose_cmd -f "$compose_file" -f "$OVERRIDE_FILE" --env-file "$ENV_PATH" down
+else
+  $compose_cmd -f "$compose_file" --env-file "$ENV_PATH" down
+fi
 log_ok "容器已停止"

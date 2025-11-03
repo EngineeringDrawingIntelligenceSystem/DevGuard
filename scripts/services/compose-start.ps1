@@ -12,12 +12,10 @@ function Write-Ok($msg)   { Write-Host "[OK]   $msg" -ForegroundColor Green }
 function Write-Err($msg)  { Write-Host "[ERR]  $msg" -ForegroundColor Red }
 
 # 选择 compose 命令
-$composeCmd = $null
-try { docker compose version *> $null; $composeCmd = { param($f) docker compose -f $f --env-file "$Root/.env" } } catch {}
-if (-not $composeCmd) {
-    if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
-        $composeCmd = { param($f) docker-compose -f $f --env-file "$Root/.env" }
-    } else {
+$useComposePlugin = $false
+try { docker compose version *> $null; $useComposePlugin = $true } catch {}
+if (-not $useComposePlugin) {
+    if (-not (Get-Command docker-compose -ErrorAction SilentlyContinue)) {
         Write-Err "未检测到 docker compose 或 docker-compose"
         exit 1
     }
@@ -51,7 +49,15 @@ Write-Info "使用 Compose 文件: $composeFile"
 & (Join-Path $Root 'scripts/setup-system.ps1') -Quiet
 
 Write-Info "启动服务容器 (detached)..."
-& $composeCmd.Invoke($composeFile) up -d
+${overridePath} = Join-Path $Root 'docker-compose/windows-overrides.yml'
+$args = @('-f', $composeFile)
+if (Test-Path $overridePath) { $args += @('-f', $overridePath) }
+$args += @('--env-file', (Join-Path $Root '.env'), 'up', '-d')
+if ($useComposePlugin) {
+    & docker compose @args
+} else {
+    & docker-compose @args
+}
 
 Write-Ok "容器已启动"
 

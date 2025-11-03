@@ -1,0 +1,13 @@
+services:
+  postgres:
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  redis:
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

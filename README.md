@@ -35,7 +35,8 @@ DevGuard 是一个专为初创团队设计的**一体化远程开发支持平台
 ├─────────────────────────────────────────────────────────────┤
 │  💻 核心应用层                                              │
 │  ├─ Gitea: 代码仓库 + CI/CD + 制品管理                      │
-│  └─ Nextcloud: 企业协作平台 + 文档管理                      │
+│  ├─ Nextcloud: 企业协作平台 + 文档管理                      │
+│  └─ Jenkins: 系统集成与 DevOps 流水线                      │
 ├─────────────────────────────────────────────────────────────┤
 │  🔧 CI/CD 执行层                                            │
 │  ├─ Build Runners (代码构建)                                │
@@ -81,6 +82,7 @@ DevGuard 是一个专为初创团队设计的**一体化远程开发支持平台
 - **多语言支持**: Node.js, Python, Java, Go 等主流技术栈
 - **容器化构建**: Docker-in-Docker，多架构镜像构建
 - **性能监控**: 自动化性能测试，性能回归检测
+- **职责分离**: Gitea Actions 专注于仓库内部 CI/CD；系统集成与跨仓库 DevOps 任务由 Jenkins 统一编排
 
 ## 📋 部署前置条件
 
@@ -181,7 +183,8 @@ sudo ./scripts/generate-config.sh \
   -t Asia/Shanghai \
   -g code.company.com \
   -r https://code.company.com \
-  -n cloud.company.com
+  -n cloud.company.com \
+  -j jenkins.company.com
 
 # 4. 启动服务（自动根据 .env 是否存在 Cloudflare Token 选择栈）
 sudo ./scripts/services/compose-start.sh --stack auto
@@ -198,11 +201,22 @@ sudo ./scripts/services/compose-stop.sh --stack auto
 - 带 Cloudflare：`docker-compose/stack-with-cloudflare.yml`
 - 不带 Cloudflare：`docker-compose/stack-no-cloudflare.yml`
 
+### 服务访问
+- 代码平台 (Gitea): `code.agaistock.xyz`
+- 文档平台 (Nextcloud): `cloud.agaistock.xyz`
+- 系统集成/DevOps (Jenkins): `jenkins.agaistock.xyz`
+
 ### 部署后配置
-1. **域名配置**: 设置 git.company.com, docs.company.com
+1. **域名配置**: 设置 `code.company.com`, `cloud.company.com`, `jenkins.company.com`
 2. **团队导入**: 批量导入团队成员账户
 3. **权限配置**: 设置项目和文档访问权限
 4. **备份测试**: 验证自动备份功能正常
+
+### Jenkins 使用说明（简要）
+- **首次登录**: 浏览器访问 `http://jenkins.agaistock.xyz`（启用 Cloudflare 后使用 `https://`）
+- **初始密码**: 运行 `docker exec devguard-jenkins cat /var/jenkins_home/secrets/initialAdminPassword`
+- **数据持久化**: `docker-compose/data/jenkins/home`
+- **代理与网络**: 通过 Nginx 反代暴露 HTTP 服务；未开放 JNLP 端口（50000），如需外部 Agent 建议通过内网或在同一宿主机内启动 Agent 容器
 
 ## 📈 扩展能力
 

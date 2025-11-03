@@ -62,6 +62,8 @@ mkdir -p "$DATA_ROOT/gitea"
 mkdir -p "$DATA_ROOT/nextcloud/html" "$DATA_ROOT/nextcloud/data" "$DATA_ROOT/nextcloud/config" "$DATA_ROOT/nextcloud/apps"
 mkdir -p "$DATA_ROOT/onlyoffice/Data" "$DATA_ROOT/onlyoffice/Logs"
 mkdir -p "$DATA_ROOT/nginx/logs"
+mkdir -p "$DATA_ROOT/jenkins/home"
+mkdir -p "$DATA_ROOT/redis"
 log_ok "数据目录初始化完成"
 
 # 5) 简要网络与防火墙提示

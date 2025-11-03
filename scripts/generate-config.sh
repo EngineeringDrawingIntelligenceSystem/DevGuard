@@ -17,23 +17,25 @@ GITEA_DOMAIN_DEFAULT="localhost"
 GITEA_ROOT_URL_DEFAULT="http://localhost:3000"
 NEXTCLOUD_DOMAIN_DEFAULT="cloud.local"
 ONLYOFFICE_DOMAIN_DEFAULT="office.local"
+JENKINS_DOMAIN_DEFAULT="jenkins.local"
 
 usage(){
   cat <<EOF
-用法: $0 [-t TZ] [-g GITEA_DOMAIN] [-r GITEA_ROOT_URL] [-n NEXTCLOUD_DOMAIN] [-o ONLYOFFICE_DOMAIN]
+用法: $0 [-t TZ] [-g GITEA_DOMAIN] [-r GITEA_ROOT_URL] [-n NEXTCLOUD_DOMAIN] [-o ONLYOFFICE_DOMAIN] [-j JENKINS_DOMAIN]
 
 示例:
-  $0 -t Asia/Shanghai -g code.local -r http://code.local:3000 -n cloud.local -o office.local
+  $0 -t Asia/Shanghai -g code.local -r http://code.local:3000 -n cloud.local -o office.local -j jenkins.local
 EOF
 }
 
-while getopts ":t:g:r:n:o:h" opt; do
+while getopts ":t:g:r:n:o:j:h" opt; do
   case "$opt" in
     t) TZ_DEFAULT="$OPTARG" ;;
     g) GITEA_DOMAIN_DEFAULT="$OPTARG" ;;
     r) GITEA_ROOT_URL_DEFAULT="$OPTARG" ;;
     n) NEXTCLOUD_DOMAIN_DEFAULT="$OPTARG" ;;
     o) ONLYOFFICE_DOMAIN_DEFAULT="$OPTARG" ;;
+    j) JENKINS_DOMAIN_DEFAULT="$OPTARG" ;;
     h) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -75,6 +77,9 @@ ensure "NEXTCLOUD_ADMIN_PASSWORD" "$(rand)"
 # OnlyOffice
 ensure "ONLYOFFICE_SECRET" "$(rand)"
 ensure "ONLYOFFICE_DOMAIN" "$ONLYOFFICE_DOMAIN_DEFAULT"
+
+# Jenkins
+ensure "JENKINS_DOMAIN" "$JENKINS_DOMAIN_DEFAULT"
 
 # Cloudflare（可选）
 ensure "CLOUDFLARE_TUNNEL_TOKEN" ""

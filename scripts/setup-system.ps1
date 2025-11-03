@@ -56,6 +56,9 @@ New-Item -ItemType Directory -Force -Path (Join-Path $dataRoot 'onlyoffice\Logs'
 # Nginx logs
 New-Item -ItemType Directory -Force -Path (Join-Path $dataRoot 'nginx\logs') | Out-Null
 
+# Jenkins
+New-Item -ItemType Directory -Force -Path (Join-Path $dataRoot 'jenkins\home') | Out-Null
+
 Write-Ok "数据目录初始化完成"
 
 # 检查 Cloudflared token 可选性

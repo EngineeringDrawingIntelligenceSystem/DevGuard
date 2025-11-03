@@ -80,6 +80,8 @@ services:
       - ./data/nextcloud/apps:/var/www/html/custom_apps
     networks:
       - devguard-main-network
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/status.php"]
       interval: 60s
@@ -107,6 +109,35 @@ services:
       retries: 3
       start_period: 60s
 
+  redis:
+    image: redis:7-alpine
+    container_name: devguard-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    restart: unless-stopped
+    networks:
+      devguard-main-network:
+        aliases:
+          - devguard-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: devguard-jenkins
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/jenkins/home:/var/jenkins_home
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+
   nginx:
     image: nginx:alpine
     container_name: devguard-nginx
@@ -121,6 +152,7 @@ services:
       - gitea
       - nextcloud
       - onlyoffice
+      - jenkins
     restart: unless-stopped
     networks:
       - devguard-main-network

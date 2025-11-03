@@ -4,6 +4,7 @@ Param(
     [string]$GiteaRootUrl = 'http://localhost:3000',
     [string]$NextcloudDomain = 'cloud.local',
     [string]$OnlyofficeDomain,
+    [string]$JenkinsDomain,
     [switch]$Force
 )
 
@@ -78,6 +79,16 @@ Ensure 'ONLYOFFICE_DOMAIN' $OnlyofficeDomain
 
 # Cloudflare (可选，默认空)
 Ensure 'CLOUDFLARE_TUNNEL_TOKEN' ''
+
+# Jenkins 域名（默认从 Nextcloud 域名推导：cloud.xxx -> jenkins.xxx）
+if (-not $JenkinsDomain -or $JenkinsDomain.Trim().Length -eq 0) {
+    if ($NextcloudDomain -match '^cloud\.(.+)$') {
+        $JenkinsDomain = "jenkins.$($Matches[1])"
+    } else {
+        $JenkinsDomain = 'jenkins.local'
+    }
+}
+Ensure 'JENKINS_DOMAIN' $JenkinsDomain
 
 # 写回文件（保留原有注释/未知键，追加缺失键到末尾）
 $existing = Get-Content $envPath

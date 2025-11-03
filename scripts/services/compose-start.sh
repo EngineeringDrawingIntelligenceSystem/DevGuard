@@ -5,6 +5,7 @@ set -euo pipefail
 BLUE='\033[0;34m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log_info(){ echo -e "${BLUE}[INFO]${NC} $1"; }
 log_ok(){ echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn(){ echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err(){ echo -e "${RED}[ERR]${NC} $1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -50,7 +51,16 @@ log_info "使用 Compose 文件: $compose_file"
 "$PROJECT_ROOT/scripts/setup-ubuntu.sh" >/dev/null || true
 
 log_info "启动服务容器..."
-$compose_cmd -f "$compose_file" --env-file "$ENV_PATH" up -d
+# WSL + Windows 驱动盘路径下使用命名卷覆盖，避免 Postgres 权限问题
+IS_WSL="false"
+if [[ -f /proc/version ]] && grep -qi microsoft /proc/version; then IS_WSL="true"; fi
+OVERRIDE_FILE="$PROJECT_ROOT/docker-compose/windows-overrides.yml"
+if [[ "$IS_WSL" == "true" && "$PROJECT_ROOT" == /mnt/* && -f "$OVERRIDE_FILE" ]]; then
+  log_warn "检测到 WSL 且项目位于 Windows 驱动器 (/mnt/*)。应用 windows-overrides.yml 修复 Postgres 权限。"
+  $compose_cmd -f "$compose_file" -f "$OVERRIDE_FILE" --env-file "$ENV_PATH" up -d
+else
+  $compose_cmd -f "$compose_file" --env-file "$ENV_PATH" up -d
+fi
 log_ok "容器已启动"
 
 log_info "当前容器状态:"
