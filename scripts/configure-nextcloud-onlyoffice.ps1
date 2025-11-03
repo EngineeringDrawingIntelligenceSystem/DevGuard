@@ -65,6 +65,7 @@ if (-not $installed) {
 
 Write-Info '设置 trusted_domains 与 overwriteprotocol'
 Occ "config:system:set trusted_domains 1 --value=$ncDomain"
+Occ "config:system:set trusted_domains 2 --value=devguard-nextcloud"
 Occ "config:system:set overwriteprotocol --value=$proto"
 
 Write-Info '安装/启用 ONLYOFFICE 插件'
@@ -74,7 +75,8 @@ Occ 'app:enable onlyoffice'
 Write-Info '写入 ONLYOFFICE 集成配置'
 Occ "config:app:set onlyoffice DocumentServerUrl --value=$proto://$ooDomain"
 Occ 'config:app:set onlyoffice DocumentServerInternalUrl --value=http://devguard-onlyoffice'
-Occ 'config:app:set onlyoffice StorageUrl --value=http://devguard-nextcloud'
+if ($proto -eq 'https') { $storageUrl = "https://$ncDomain/" } else { $storageUrl = 'http://devguard-nextcloud' }
+Occ "config:app:set onlyoffice StorageUrl --value=$storageUrl"
 if ($ooSecret) { Occ "config:app:set onlyoffice jwt_secret --value=$ooSecret" }
 Occ 'config:app:set onlyoffice jwt_header --value=Authorization'
 

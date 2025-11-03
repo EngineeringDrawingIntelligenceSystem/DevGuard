@@ -83,6 +83,7 @@ fi
 # 基础系统配置
 log_info "设置 trusted_domains 与 overwriteprotocol"
 occ config:system:set trusted_domains 1 --value="$NEXTCLOUD_DOMAIN" || true
+occ config:system:set trusted_domains 2 --value="devguard-nextcloud" || true
 occ config:system:set overwriteprotocol --value="$PROTO" || true
 
 # 安装/启用 ONLYOFFICE 应用
@@ -94,9 +95,13 @@ occ app:enable onlyoffice || true
 
 # 设置 ONLYOFFICE 集成配置
 log_info "写入 ONLYOFFICE 集成配置"
+STORAGE_URL="http://devguard-nextcloud"
+if [[ "$PROTO" == "https" ]]; then
+  STORAGE_URL="https://${NEXTCLOUD_DOMAIN}/"
+fi
 occ config:app:set onlyoffice DocumentServerUrl --value="${PROTO}://${ONLYOFFICE_DOMAIN}"
 occ config:app:set onlyoffice DocumentServerInternalUrl --value="http://devguard-onlyoffice"
-occ config:app:set onlyoffice StorageUrl --value="http://devguard-nextcloud"
+occ config:app:set onlyoffice StorageUrl --value="$STORAGE_URL"
 if [[ -n "$ONLYOFFICE_SECRET" ]]; then
   occ config:app:set onlyoffice jwt_secret --value="$ONLYOFFICE_SECRET"
 fi
