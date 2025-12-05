@@ -56,8 +56,8 @@ services:
       - ./known_hosts:/var/jenkins_home/.ssh/known_hosts
     command: >
       sh -c "mkdir -p /var/jenkins_home/.ssh; \
-      (ssh-keyscan 192.168.2.122 >> /var/jenkins_home/.ssh/known_hosts || true); \
-      (ssh-keyscan 192.168.2.123 >> /var/jenkins_home/.ssh/known_hosts || true); \
+      ssh-keyscan 192.168.2.122 >> /var/jenkins_home/.ssh/known_hosts 2>/dev/null || true; \
+      ssh-keyscan 192.168.2.123 >> /var/jenkins_home/.ssh/known_hosts 2>/dev/null || true; \
       exec /usr/local/bin/jenkins.sh"
     restart: unless-stopped
     networks:
