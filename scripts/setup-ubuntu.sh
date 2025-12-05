@@ -44,6 +44,22 @@ else
   $SUDO apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   $SUDO systemctl enable docker
   $SUDO systemctl start docker
+  $SUDO mkdir -p /etc/docker
+  $SUDO tee /etc/docker/daemon.json > /dev/null <<'JSON'
+{
+  "registry-mirrors": [
+    "http://docker.m.daocloud.io",
+    "https://iesh1wag.mirror.aliyuncs.com",
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com",
+    "https://mirror.ccs.tencentyun.com",
+    "https://registry.docker-cn.com"
+  ],
+  "max-concurrent-downloads": 10,
+  "max-concurrent-uploads": 5
+}
+JSON
+  $SUDO systemctl restart docker || true
   log_ok "Docker 安装完成"
 fi
 
@@ -53,6 +69,11 @@ if [[ $EUID -ne 0 ]]; then
 fi
 $SUDO usermod -aG docker devguard || true
 log_info "已确保用户加入 docker 组（可能需重新登录生效）"
+if command -v newgrp >/dev/null 2>&1; then
+  newgrp docker <<'EOF'
+true
+EOF
+fi
 
 # 4) 初始化数据目录（与当前 compose 栈一致）
 DATA_ROOT="$PROJECT_ROOT/docker-compose/data"

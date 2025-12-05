@@ -194,6 +194,13 @@ install_docker() {
     # 启动并启用 Docker 服务
     sudo systemctl start docker
     sudo systemctl enable docker
+    if [[ $EUID -ne 0 ]]; then
+        if command -v newgrp >/dev/null 2>&1; then
+            newgrp docker <<'EOF'
+true
+EOF
+        fi
+    fi
     
     log_success "Docker 安装完成"
 }
@@ -397,7 +404,17 @@ configure_docker() {
   },
   "live-restore": true,
   "userland-proxy": false,
-  "experimental": false
+  "experimental": false,
+  "registry-mirrors": [
+    "http://docker.m.daocloud.io",
+    "https://iesh1wag.mirror.aliyuncs.com",
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com",
+    "https://mirror.ccs.tencentyun.com",
+    "https://registry.docker-cn.com"
+  ],
+  "max-concurrent-downloads": 10,
+  "max-concurrent-uploads": 5
 }
 EOF
     
