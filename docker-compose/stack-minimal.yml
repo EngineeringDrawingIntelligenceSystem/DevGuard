@@ -53,6 +53,7 @@ services:
       - JENKINS_OPTS=--prefix=/jenkins
     volumes:
       - ./data/jenkins/home:/var/jenkins_home
+      - ./known_hosts:/var/jenkins_home/.ssh/known_hosts
     restart: unless-stopped
     networks:
       - devguard-main-network
