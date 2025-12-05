@@ -1,0 +1,93 @@
+services:
+  gitea:
+    image: gitea/gitea:1.21
+    container_name: devguard-gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__server__ROOT_URL=http://${SERVER_IP:-127.0.0.1}/gitea
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__DISABLE_SSH=true
+      - GITEA__packages__ENABLED=true
+      - GITEA__actions__ENABLED=true
+      - GITEA__log__MODE=console,file
+      - GITEA__log__LEVEL=Info
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: devguard-dozzle
+    environment:
+      - DOZZLE_BASE=/dozzle
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/dozzle/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: devguard-jenkins
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - JENKINS_OPTS=--prefix=/jenkins
+    volumes:
+      - ./data/jenkins/home:/var/jenkins_home
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/jenkins/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  nginx:
+    image: nginx:alpine
+    container_name: devguard-nginx
+    volumes:
+      - ../configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../configs/nginx/conf.d/ip-router.conf:/etc/nginx/conf.d/ip-router.conf:ro
+      - ./data/nginx/logs:/var/log/nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - gitea
+      - jenkins
+      - dozzle
+    restart: unless-stopped
+    networks:
+      - devguard-main-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  devguard-main-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
